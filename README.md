@@ -1,8 +1,8 @@
 # PaymentMollie
-[Mollie](https://www.mollie.com/be/) payment method for ProcessWire
+[Mollie](https://www.mollie.com/be/) payment method for [ProcessWire](https://processwire.com/)
 
 ## Requirements
-Requires PaymentModule -module
+Requires [PaymentModule -module](http://modules.processwire.com/modules/payment-module/)
 
 ## Mollie API
 
