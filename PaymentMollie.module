@@ -1,0 +1,158 @@
+<?php namespace ProcessWire;
+
+// Here you can find more information about the Mollie php api https://github.com/mollie/mollie-api-php
+
+
+class PaymentMollie extends PaymentModule {
+
+    public static function getModuleInfo() {
+        return array(
+            'title' => 'PaymentMollie',
+            'version' => '0.0.1',
+            'summary' => 'Mollie Payment method',
+            'singular' => false,
+            'autoload' => false,
+            'requires' => 'ProcessWire>=3.0.98, PaymentModule',
+        );
+    }
+
+    public function init() {
+
+    }
+
+    public function getTitle() {
+        return $this->_("Mollie");
+    }
+
+    public function getFailureReason() {
+        return "Error";
+    }
+    
+    public function processPayment() {
+
+        $payment_id = input()->post->id;
+
+        $mollie = new \Mollie_API_Client();
+        $mollie->setApiKey($this->api_key);
+
+        $payment = $mollie->payments->get($payment_id);
+        $order_id = $payment->metadata->order_id;
+
+        if ($payment->isPaid() == true) {
+
+            $order = pages()->get($order_id);
+            $order->of(false);
+            $order->pad_paid = time();
+            $order->addNote($this->_("Order paid using Mollie"));
+            $order->removeStatus(Page::statusUnpublished);
+            $order->save();
+
+            return true;
+        }
+        elseif ($payment->isOpen() == FALSE) {
+
+            return false;
+        }
+        return false;
+    }
+
+    public function render () {
+
+        $mollie = new \Mollie_API_Client();
+
+        $mollie->setApiKey($this->test_api_key);
+        if($this->live_check == "1"){
+            $mollie->setApiKey($this->api_key);
+        }
+
+        $payment = $mollie->payments->create(array(
+            "amount"      => number_format(($this->getTotalAmount() /100), 2, '.', ' '),
+            "description" => "Bestelling van: " . $this->customer->givenName . " " . $this->customer->familyName ,
+            "redirectUrl" => $this->httphost . "?id=".$this->id,
+            "webhookUrl"  => $this->httphost. "checkout/payment",
+
+            // Specify here wat you want
+            "metadata" => array(
+                "order_id" => $this->id,
+                /*
+                    "customer_name" => $this->customer->givenName,
+                    "customer_familyName" => $this->customer->familyName,
+                    "customer_address" => $this->customer->streetAddress,
+                    "customer_locality" => $this->customer->locality,
+                    "customer_postalCode" => $this->customer->postalCode,
+                    "customer_country" => $this->customer->country,
+                    "customer_email" => $this->customer->email
+                */
+            )
+        ));
+
+        // Type here your custom HTML
+        // use $payment->getPaymentUrl() as url for your payment link
+
+        return "<div class='o-grid u-margin-top-md'>
+                    <div class='o-col o-col-lg o-col-12 o-col-7-lg o-col-8-xxl'>
+                        <div class='o-grid o-flex-align-items-center'>
+                        <div class='o-col u-margin-right-auto u-text-container'>
+                            <p class='c-back-to-overview'>
+                                <a href='" . pages()->get('template=checkout')->url . "' title='". __('Back to payment information') ."'>
+                                    <svg class='c-icon c-icon-cart'><use xlink:href='" . urls()->root . "_prototype/dist/icons/sprite.svg#c-icon-chevron-left'></use></svg>". __('Back to payment information') ."
+                                </a>
+                            </p>
+                        </div>
+                        <div class='o-col u-margin-left-auto u-text-container'>
+                            <form action='{$payment->getPaymentUrl()}'>
+                                <button type='submit' class='c-button u-margin-left-auto'>". __('Pay') ."<svg class='c-icon c-icon-name'><use xlink:href='" . urls()->root . "_prototype/dist/icons/sprite.svg#c-icon-arrow-right'></use></svg>
+                                </button>
+                            </form>
+                        </div>
+                        </div>
+                    </div>
+                </div>";
+
+    }
+
+    public static function getModuleConfigInputfields(array $data) {
+
+        $inputfields = new InputfieldWrapper();
+
+        // Test API
+        $live_api_field = wire('modules')->get('InputfieldText');
+        $live_api_field->name = 'test_api_key';
+        $live_api_field->label = __("Test API Key");
+        $live_api_field->notes = __("");
+        if(isset($data['test_api_key'])) $live_api_field->value = $data['test_api_key'];
+
+        $inputfields->add($live_api_field);
+
+        // Live API
+        $test_api_field = wire('modules')->get('InputfieldText');
+        $test_api_field->name = 'api_key';
+        $test_api_field->label = __("Live API Key");
+        $test_api_field->notes = __("");
+        if(isset($data['api_key'])) $test_api_field->value = $data['api_key'];
+
+        $inputfields->add($test_api_field);
+
+        // Select live or test API
+        $check_api_field = wire('modules')->get('InputfieldCheckbox');
+        $check_api_field->name = 'live_check';
+        $check_api_field->checked = $data['live_check'];
+        $check_api_field->label = __("Use Live API Key");
+        $check_api_field->notes = __("If not selected, the test-api will be used. Keep in mind that you also have to activate the Live api on your Mollie dashboard");
+        if(isset($data['live_check'])) $check_api_field->value = $data['live_check'];
+
+        $inputfields->add($check_api_field);
+
+        // HTTP Host url
+        $httphost_field = wire('modules')->get('InputfieldURL');
+        $httphost_field->name = 'httphost';
+        $httphost_field->label = __("HTTP Host");
+        $httphost_field->notes = __("");
+        if(isset($data['httphost'])) $httphost_field->value = $data['httphost'];
+
+        $inputfields->add($httphost_field);
+
+        return $inputfields;
+    }
+
+}
