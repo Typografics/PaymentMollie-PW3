@@ -2,75 +2,117 @@
 
 // Here you can find more information about the Mollie php api https://github.com/mollie/mollie-api-php
 
+//require_once __DIR__ . "/vendor/autoload.php";
 
-class PaymentMollie extends PaymentModule {
+class PaymentMollie extends PaymentModule
+{
 
-    public static function getModuleInfo() {
+    public static function getModuleInfo()
+    {
         return array(
             'title' => 'PaymentMollie',
-            'version' => '0.0.1',
+            'version' => '0.0.2',
             'summary' => 'Mollie Payment method',
             'singular' => false,
             'autoload' => false,
-            'requires' => 'ProcessWire>=3.0.98, PaymentModule',
+            'requires' => 'ProcessWire>=3.0.90, PaymentModule',
         );
     }
 
-    public function init() {
-
+    public function init()
+    {
+        ini_set('display_errors', 1);
+        ini_set('display_startup_errors', 1);
+        error_reporting(E_ALL);
     }
 
-    public function getTitle() {
-        return $this->_("Mollie");
+    public function getTitle()
+    {
+        return $this->_("Mollie: iDeal, Bancontact");
     }
 
-    public function getFailureReason() {
+    public function getFailureReason()
+    {
         return "Error";
     }
-    
-    public function processPayment() {
 
-        $payment_id = input()->post->id;
+    public function processPayment()
+    {
+        $payment_id = wire()->input->post->id;
+        $order_id = wire()->input->urlSegment2;
 
-        $mollie = new \Mollie_API_Client();
-        $mollie->setApiKey($this->api_key);
+        $mollie = new \Mollie\Api\MollieApiClient();
+
+        $mollie->setApiKey($this->test_api_key);
+        if ($this->live_check == "1") {
+            $mollie->setApiKey($this->api_key);
+        }
 
         $payment = $mollie->payments->get($payment_id);
         $order_id = $payment->metadata->order_id;
 
+        wire()->log->save("mollie", "Processing payment for... $order_id");
+
         if ($payment->isPaid() == true) {
 
-            $order = pages()->get($order_id);
+            wire()->log->save("mollie", "Order $order_id was paid using mollie!");
+
+            $order = wire()->pages->get($order_id);
             $order->of(false);
             $order->pad_paid = time();
-            $order->addNote($this->_("Order paid using Mollie"));
+            $order->addNote($this->_("Order paid using Mollie") . ": " . $payment->id);
             $order->removeStatus(Page::statusUnpublished);
             $order->save();
 
             return true;
-        }
-        elseif ($payment->isOpen() == FALSE) {
-
+        } elseif ($payment->isOpen() == FALSE) {
             return false;
         }
         return false;
     }
 
-    public function render () {
-
-        $mollie = new \Mollie_API_Client();
+    public function getMollieMethods()
+    {
+        $mollie = new \Mollie\Api\MollieApiClient();
 
         $mollie->setApiKey($this->test_api_key);
-        if($this->live_check == "1"){
+        if ($this->live_check == "1") {
             $mollie->setApiKey($this->api_key);
         }
 
-        $payment = $mollie->payments->create(array(
-            "amount"      => number_format(($this->getTotalAmount() /100), 2, '.', ' '),
-            "description" => "Bestelling van: " . $this->customer->givenName . " " . $this->customer->familyName ,
-            "redirectUrl" => $this->httphost . "?id=".$this->id,
-            "webhookUrl"  => $this->httphost. "checkout/payment",
+        $methods = $mollie->methods->all();
+        $return = array();
 
+        foreach ($methods as $method) {
+            $return[] = array(
+                "title" => htmlspecialchars($method->description),
+                "icon" => htmlspecialchars($method->image->size1x),
+                "icon2x" => htmlspecialchars($method->image->size2x),
+            );
+        }
+
+        return $return;
+    }
+
+    public function render()
+    {
+        $output = "";
+
+        $mollie = new \Mollie\Api\MollieApiClient();
+
+        $mollie->setApiKey($this->test_api_key);
+        if ($this->live_check == "1") {
+            $mollie->setApiKey($this->api_key);
+        }
+
+        $paymentInfo = array(
+            "amount"   => array(
+                "value" => number_format(($this->getTotalAmount() /100), 2, '.', ''),
+                "currency" => 'EUR',
+            ),
+            "description" => "Bestelling van: " . $this->customer->givenName . " " . $this->customer->familyName,
+            "redirectUrl" => $this->httphost . "checkout/?id=" . $this->id,
+            "webhookUrl"  => $this->httphost. "checkout/payment/",
             // Specify here wat you want
             "metadata" => array(
                 "order_id" => $this->id,
@@ -84,10 +126,33 @@ class PaymentMollie extends PaymentModule {
                     "customer_email" => $this->customer->email
                 */
             )
-        ));
+        );
+
+        // $output .= "<pre>" . print_r($paymentInfo, true) . "</pre>";
+
+        $payment = $mollie->payments->create($paymentInfo);
+
+        wire()->log->save("mollie", "Creating the payment... $order_id");
 
         // Type here your custom HTML
         // use $payment->getPaymentUrl() as url for your payment link
+
+        /*
+        foreach ($methods as $method) {
+            $output .= '<div style="line-height:40px; vertical-align:top">';
+            $output .= '<img src="' . htmlspecialchars($method->image->size1x) . '" srcset="' . htmlspecialchars($method->image->size2x) . ' 2x"> ';
+            $output .= htmlspecialchars($method->description) . ' (' . htmlspecialchars($method->id) . ')';
+            $output .= '</div>';
+        }
+        $output .= "</div>";
+
+        $output  .= "<div><form action='{$payment->getCheckoutUrl()}'>
+            <button type='submit'>". __('Pay') ."</button></form></div>";
+
+        return $output;
+
+        */
+
 
         return "<div class='o-grid u-margin-top-md'>
                     <div class='o-col o-col-lg o-col-12 o-col-7-lg o-col-8-xxl'>
@@ -100,7 +165,7 @@ class PaymentMollie extends PaymentModule {
                             </p>
                         </div>
                         <div class='o-col u-margin-left-auto u-text-container'>
-                            <form action='{$payment->getPaymentUrl()}'>
+                            <form action='{$payment->getCheckoutUrl()}'>
                                 <button type='submit' class='c-button u-margin-left-auto'>". __('Pay') ."<svg class='c-icon c-icon-name'><use xlink:href='" . urls()->root . "_prototype/dist/icons/sprite.svg#c-icon-arrow-right'></use></svg>
                                 </button>
                             </form>
@@ -108,11 +173,10 @@ class PaymentMollie extends PaymentModule {
                         </div>
                     </div>
                 </div>";
-
     }
 
-    public static function getModuleConfigInputfields(array $data) {
-
+    public static function getModuleConfigInputfields(array $data)
+    {
         $inputfields = new InputfieldWrapper();
 
         // Test API
@@ -120,7 +184,9 @@ class PaymentMollie extends PaymentModule {
         $live_api_field->name = 'test_api_key';
         $live_api_field->label = __("Test API Key");
         $live_api_field->notes = __("");
-        if(isset($data['test_api_key'])) $live_api_field->value = $data['test_api_key'];
+        if (isset($data['test_api_key'])) {
+            $live_api_field->value = $data['test_api_key'];
+        }
 
         $inputfields->add($live_api_field);
 
@@ -129,7 +195,9 @@ class PaymentMollie extends PaymentModule {
         $test_api_field->name = 'api_key';
         $test_api_field->label = __("Live API Key");
         $test_api_field->notes = __("");
-        if(isset($data['api_key'])) $test_api_field->value = $data['api_key'];
+        if (isset($data['api_key'])) {
+            $test_api_field->value = $data['api_key'];
+        }
 
         $inputfields->add($test_api_field);
 
@@ -139,7 +207,9 @@ class PaymentMollie extends PaymentModule {
         $check_api_field->checked = $data['live_check'];
         $check_api_field->label = __("Use Live API Key");
         $check_api_field->notes = __("If not selected, the test-api will be used. Keep in mind that you also have to activate the Live api on your Mollie dashboard");
-        if(isset($data['live_check'])) $check_api_field->value = $data['live_check'];
+        if (isset($data['live_check'])) {
+            $check_api_field->value = $data['live_check'];
+        }
 
         $inputfields->add($check_api_field);
 
@@ -148,11 +218,12 @@ class PaymentMollie extends PaymentModule {
         $httphost_field->name = 'httphost';
         $httphost_field->label = __("HTTP Host");
         $httphost_field->notes = __("");
-        if(isset($data['httphost'])) $httphost_field->value = $data['httphost'];
+        if (isset($data['httphost'])) {
+            $httphost_field->value = $data['httphost'];
+        }
 
         $inputfields->add($httphost_field);
 
         return $inputfields;
     }
-
-}
+};
